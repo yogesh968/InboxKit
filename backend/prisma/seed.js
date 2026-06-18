@@ -29,7 +29,7 @@ async function main() {
   // Delete any existing tiles to ensure clean state
   await prisma.tile.deleteMany({});
   
-  // Use createMany for high performance batch insertion in PostgreSQL
+  // Use createMany for high performance batch insertion in MongoDB
   await prisma.tile.createMany({
     data: tilesData,
   });

@@ -1,11 +1,11 @@
 # InboxKit -- Real-Time Multiplayer Grid Capture Game
 
-A full-stack, real-time multiplayer territory control game built with React, Node.js, Socket.IO, and PostgreSQL. Players join a shared 50x50 grid, claim tiles by clicking on them, and compete for leaderboard dominance -- all updated live across every connected client.
+A full-stack, real-time multiplayer territory control game built with React, Node.js, Socket.IO, and MongoDB. Players join a shared 50x50 grid, claim tiles by clicking on them, and compete for leaderboard dominance -- all updated live across every connected client.
 
 ---
 ## Overview
 
-InboxKit presents a 50x50 interactive grid where multiple players can simultaneously capture tiles. Each player is assigned a unique color upon joining. Tile ownership is reflected in real time across all connected browsers via WebSocket communication. A server-enforced 5-second cooldown prevents rapid-fire captures, and row-level database locking guarantees correctness under concurrent access.
+InboxKit presents a 50x50 interactive grid where multiple players can simultaneously capture tiles. Each player is assigned a unique color upon joining. Tile ownership is reflected in real time across all connected browsers via WebSocket communication. A server-enforced 5-second cooldown prevents rapid-fire captures, and database validations guarantee correctness under concurrent access.
 
 ---
 
@@ -17,7 +17,7 @@ InboxKit presents a 50x50 interactive grid where multiple players can simultaneo
 - **Live Leaderboard** -- Top 10 players ranked by tile count, updated in real time after every capture.
 - **Activity Feed** -- A scrollable feed showing the last 20 tile captures with player name, tile coordinates, and timestamp.
 - **Cooldown System** -- A 5-second server-enforced cooldown between captures, with a smooth client-side progress bar indicator.
-- **Concurrency Safety** -- PostgreSQL row-level locking (`SELECT ... FOR UPDATE`) within serialized transactions prevents race conditions and double captures.
+- **Concurrency Safety** -- Cooldown verification and atomic database updates prevent race conditions and double captures.
 - **Confetti Feedback** -- A subtle confetti animation on successful tile capture for visual feedback.
 
 ---
@@ -31,7 +31,7 @@ Client (React + Vite)            Server (Node.js + Express)
   Browser                          Socket.IO Server
     |                                  |
     |--- WebSocket (Socket.IO) ------->|
-    |                                  |--- Prisma ORM ---> PostgreSQL
+    |                                  |--- Prisma ORM ---> MongoDB
     |<-- Real-time events -------------|
     |                                  |
   React Components               Event Handlers
@@ -41,7 +41,7 @@ Client (React + Vite)            Server (Node.js + Express)
   - useSocket (hook)
 ```
 
-The frontend establishes a persistent WebSocket connection to the backend on login. All game state mutations flow through Socket.IO events. The backend validates every action, applies business rules (cooldowns, ownership checks), and persists state to PostgreSQL via Prisma before broadcasting updates.
+The frontend establishes a persistent WebSocket connection to the backend on login. All game state mutations flow through Socket.IO events. The backend validates every action, applies business rules (cooldowns, ownership checks), and persists state to MongoDB via Prisma before broadcasting updates.
 
 ---
 
@@ -51,7 +51,7 @@ The frontend establishes a persistent WebSocket connection to the backend on log
 |------------|-----------------------------------|
 | Frontend   | React 19, Vite 8, Tailwind CSS 4  |
 | Backend    | Node.js, Express 4, Socket.IO 4   |
-| Database   | PostgreSQL                        |
+| Database   | MongoDB                           |
 | ORM        | Prisma 5                          |
 | Language   | JavaScript (ES Modules)           |
 
@@ -102,7 +102,7 @@ Before running the project, ensure the following are installed on your machine:
 
 - **Node.js** -- version 18 or higher
 - **npm** -- version 9 or higher (ships with Node.js)
-- **PostgreSQL** -- version 14 or higher, with a running instance
+- **MongoDB** -- a running local instance or a MongoDB Atlas cloud database URI
 
 ---
 
@@ -126,14 +126,27 @@ cd ../frontend && npm install
 
 ## Environment Variables
 
+### Backend Environment Variables
 Create a `.env` file in the `backend/` directory:
 
 ```env
 PORT=5050
-DATABASE_URL="postgresql://<username>@localhost:5432/gridgame?schema=public"
+DATABASE_URL="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<dbname>?retryWrites=true&w=majority"
+FRONTEND_URL="http://localhost:5173"
 ```
 
-Replace `<username>` with your PostgreSQL username. No `.env` file is required for the frontend in development; it defaults to connecting to `http://localhost:5050`.
+- `PORT` -- The port the Express + Socket.IO server runs on (defaults to 5050).
+- `DATABASE_URL` -- Your MongoDB connection string.
+- `FRONTEND_URL` -- The URL of your frontend application (used for CORS settings).
+
+### Frontend Environment Variables
+Create a `.env` file in the `frontend/` directory:
+
+```env
+VITE_API_URL="http://localhost:5050"
+```
+
+- `VITE_API_URL` -- The URL of the backend server.
 
 ---
 
@@ -145,14 +158,14 @@ From the `backend/` directory, run the following commands in order:
 # Generate the Prisma client
 npm run db:generate
 
-# Apply database migrations
-npm run db:migrate
+# Push schema directly to MongoDB (MongoDB does not require SQL migrations)
+npm run db:push
 
 # Seed the 2500-tile grid
 npm run db:seed
 ```
 
-This creates three tables -- `User`, `Tile`, and `TileHistory` -- and populates the `Tile` table with 2500 entries representing the 50x50 grid.
+This creates the collections (`User`, `Tile`, `TileHistory`) in MongoDB and populates the `Tile` collection with 2500 entries representing the 50x50 grid.
 
 ---
 
@@ -186,11 +199,11 @@ To test multiplayer, open the same URL in a second browser tab or window and joi
 
 The game handles concurrent tile captures safely through the following mechanisms:
 
-1. **Row-Level Locking** -- The `tile:capture` handler executes inside a Prisma `$transaction` block. Both the target `User` row and `Tile` row are locked using `SELECT ... FOR UPDATE` before any mutations occur.
+1. **State Validation** -- The backend validates both user cooldowns and tile ownership before committing any database writes.
 
-2. **Cooldown Enforcement** -- The cooldown check reads the locked user row, ensuring that even simultaneous requests from the same user are serialized. Only the first request within a 5-second window succeeds; subsequent ones receive a `cooldown_active` event.
+2. **Single-Threaded Event Loop** -- Because the Node.js process handles incoming Socket.IO events sequentially on its single-threaded event loop, microtask execution prevents traditional multi-threaded race conditions before database calls are made.
 
-3. **Atomic Score Updates** -- Tile ownership transfer, score increment for the new owner, and score decrement for the previous owner all happen within the same database transaction. If any step fails, the entire transaction rolls back.
+3. **Incremental Score Updates** -- Score increments, decrements, and tile owner updates are handled immediately following state verification to keep the database consistent.
 
 A test suite is included to verify these guarantees:
 

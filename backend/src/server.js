@@ -10,9 +10,11 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 
+const frontendUrl = process.env.FRONTEND_URL || '*';
+
 // Enable CORS for frontend Vite development server (default 5173) and production
 app.use(cors({
-  origin: '*',
+  origin: frontendUrl,
   methods: ['GET', 'POST'],
 }));
 
@@ -28,7 +30,7 @@ const server = http.createServer(app);
 // Bind Socket.IO server with CORS configurations
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: frontendUrl,
     methods: ['GET', 'POST'],
   },
 });
