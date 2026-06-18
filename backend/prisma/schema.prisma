@@ -1,0 +1,47 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String        @id @default(uuid())
+  username      String
+  color         String
+  tilesCount    Int           @default(0)
+  lastCaptureAt DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  tiles         Tile[]
+  histories     TileHistory[]
+
+  @@index([tilesCount(desc)])
+}
+
+model Tile {
+  id        Int           @id // 0 to 2499 (x + y * 50)
+  x         Int
+  y         Int
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  updatedAt DateTime      @updatedAt
+  histories TileHistory[]
+
+  @@index([userId])
+}
+
+model TileHistory {
+  id         String   @id @default(uuid())
+  tileId     Int
+  tile       Tile     @relation(fields: [tileId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capturedAt DateTime @default(now())
+
+  @@index([tileId])
+  @@index([userId])
+  @@index([capturedAt(desc)])
+}
