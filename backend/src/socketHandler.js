@@ -174,140 +174,113 @@ export function setupSocketHandlers(io) {
       }
 
       try {
-        const result = await prisma.$transaction(async (tx) => {
-          // Lock User row to guarantee serialized cooldown checks for this specific user
-          const users = await tx.$queryRawUnsafe(
-            'SELECT * FROM "User" WHERE id = $1 FOR UPDATE',
-            userId
-          );
-
-          if (users.length === 0) {
-            throw new Error('user_not_found');
-          }
-
-          const currentUser = users[0];
-          const now = new Date();
-
-          if (currentUser.lastCaptureAt) {
-            const elapsed = now.getTime() - new Date(currentUser.lastCaptureAt).getTime();
-            if (elapsed < 5000) {
-              return { error: 'cooldown', elapsedRemaining: 5000 - elapsed };
-            }
-          }
-
-          // Lock Tile row to guarantee atomic transaction when capturing
-          const tiles = await tx.$queryRawUnsafe(
-            'SELECT * FROM "Tile" WHERE id = $1 FOR UPDATE',
-            tileId
-          );
-
-          if (tiles.length === 0) {
-            throw new Error('tile_not_found');
-          }
-
-          const currentTile = tiles[0];
-
-          if (currentTile.userId === userId) {
-            return { error: 'already_owned' };
-          }
-
-          const previousOwnerId = currentTile.userId;
-
-          // Update tile owner
-          await tx.tile.update({
-            where: { id: tileId },
-            data: { userId },
-          });
-
-          // Update user capture timestamp and increment score
-          const updatedUser = await tx.user.update({
-            where: { id: userId },
-            data: {
-              lastCaptureAt: now,
-              tilesCount: { increment: 1 },
-            },
-          });
-
-          // Decrement previous owner's score if tile was captured from someone
-          if (previousOwnerId) {
-            await tx.user.update({
-              where: { id: previousOwnerId },
-              data: {
-                tilesCount: { decrement: 1 },
-              },
-            });
-          }
-
-          // Create capturing history log
-          const history = await tx.tileHistory.create({
-            data: {
-              tileId,
-              userId,
-              capturedAt: now,
-            },
-          });
-
-          return {
-            success: true,
-            tileId,
-            x: currentTile.x,
-            y: currentTile.y,
-            userId,
-            username: currentUser.username,
-            color: currentUser.color,
-            user: updatedUser,
-            previousOwnerId,
-            historyId: history.id,
-            capturedAt: now,
-          };
+        // Fetch user and check cooldown
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
         });
 
-        if (result.error) {
-          if (result.error === 'cooldown') {
-            socket.emit('cooldown_active', { remaining: result.elapsedRemaining });
-          }
+        if (!currentUser) {
+          socket.emit('error_message', { message: 'User not found.' });
           return;
         }
 
-        if (result.success) {
-          // Emit success back to the capturer
-          socket.emit('capture_success', {
-            lastCaptureAt: result.user.lastCaptureAt,
-            tilesCount: result.user.tilesCount,
-          });
+        const now = new Date();
 
-          // Broadcast tile update to all connected users
-          io.emit('tile:updated', {
-            tileId: result.tileId,
-            x: result.x,
-            y: result.y,
-            userId: result.userId,
-            username: result.username,
-            color: result.color,
-          });
+        if (currentUser.lastCaptureAt) {
+          const elapsed = now.getTime() - new Date(currentUser.lastCaptureAt).getTime();
+          if (elapsed < 5000) {
+            socket.emit('cooldown_active', { remaining: 5000 - elapsed });
+            return;
+          }
+        }
 
-          // Fetch and broadcast updated leaderboard
-          const updatedLeaderboard = await prisma.user.findMany({
-            orderBy: { tilesCount: 'desc' },
-            take: 10,
-            select: { id: true, username: true, color: true, tilesCount: true },
-          });
-          io.emit('leaderboard:updated', { leaderboard: updatedLeaderboard });
+        // Fetch the target tile
+        const currentTile = await prisma.tile.findUnique({
+          where: { id: tileId },
+        });
 
-          // Broadcast new activity feed event
-          io.emit('activity:new', {
-            id: result.historyId,
-            tileId: result.tileId,
-            x: result.x,
-            y: result.y,
-            userId: result.userId,
-            username: result.username,
-            color: result.color,
-            capturedAt: result.capturedAt,
+        if (!currentTile) {
+          socket.emit('error_message', { message: 'Tile not found.' });
+          return;
+        }
+
+        if (currentTile.userId === userId) {
+          return; // Already owned by this user
+        }
+
+        const previousOwnerId = currentTile.userId;
+
+        // Update tile owner
+        await prisma.tile.update({
+          where: { id: tileId },
+          data: { userId },
+        });
+
+        // Update user capture timestamp and increment score
+        const updatedUser = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            lastCaptureAt: now,
+            tilesCount: { increment: 1 },
+          },
+        });
+
+        // Decrement previous owner's score if tile was captured from someone
+        if (previousOwnerId) {
+          await prisma.user.update({
+            where: { id: previousOwnerId },
+            data: {
+              tilesCount: { decrement: 1 },
+            },
           });
         }
+
+        // Create capturing history log
+        const history = await prisma.tileHistory.create({
+          data: {
+            tileId,
+            userId,
+            capturedAt: now,
+          },
+        });
+
+        // Emit success back to the capturer
+        socket.emit('capture_success', {
+          lastCaptureAt: updatedUser.lastCaptureAt,
+          tilesCount: updatedUser.tilesCount,
+        });
+
+        // Broadcast tile update to all connected users
+        io.emit('tile:updated', {
+          tileId,
+          x: currentTile.x,
+          y: currentTile.y,
+          userId,
+          username: currentUser.username,
+          color: currentUser.color,
+        });
+
+        // Fetch and broadcast updated leaderboard
+        const updatedLeaderboard = await prisma.user.findMany({
+          orderBy: { tilesCount: 'desc' },
+          take: 10,
+          select: { id: true, username: true, color: true, tilesCount: true },
+        });
+        io.emit('leaderboard:updated', { leaderboard: updatedLeaderboard });
+
+        // Broadcast new activity feed event
+        io.emit('activity:new', {
+          id: history.id,
+          tileId,
+          x: currentTile.x,
+          y: currentTile.y,
+          userId,
+          username: currentUser.username,
+          color: currentUser.color,
+          capturedAt: now,
+        });
       } catch (err) {
-        console.error('Error during tile capture transaction:', err);
+        console.error('Error during tile capture:', err);
         socket.emit('error_message', { message: 'Database error while capturing tile.' });
       }
     });
