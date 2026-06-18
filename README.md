@@ -3,24 +3,6 @@
 A full-stack, real-time multiplayer territory control game built with React, Node.js, Socket.IO, and PostgreSQL. Players join a shared 50x50 grid, claim tiles by clicking on them, and compete for leaderboard dominance -- all updated live across every connected client.
 
 ---
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Getting Started](#getting-started)
-- [Environment Variables](#environment-variables)
-- [Database Setup](#database-setup)
-- [Running the Application](#running-the-application)
-- [Concurrency and Data Integrity](#concurrency-and-data-integrity)
-- [License](#license)
-
----
-
 ## Overview
 
 InboxKit presents a 50x50 interactive grid where multiple players can simultaneously capture tiles. Each player is assigned a unique color upon joining. Tile ownership is reflected in real time across all connected browsers via WebSocket communication. A server-enforced 5-second cooldown prevents rapid-fire captures, and row-level database locking guarantees correctness under concurrent access.
