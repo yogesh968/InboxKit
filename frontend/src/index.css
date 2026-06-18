@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased font-sans;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  /* Minimal scrollbar for sidebars/feeds */
+  .minimal-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .minimal-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .minimal-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-zinc-200 rounded-full;
+  }
+  .minimal-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-zinc-300;
+  }
+}
